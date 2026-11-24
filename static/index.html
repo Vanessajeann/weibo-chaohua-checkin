@@ -225,6 +225,13 @@ textarea{height:84px;resize:vertical}
         <select id="set-check-interval" aria-label="检测间隔"></select>
       </div>
     </div>
+    <div class="set-row">
+      <div class="lab">失效提醒<small>发现账号失效后的重复提醒节奏，选「不重复」则只推一条</small></div>
+      <div class="time-pick" style="display:flex;gap:8px">
+        <select id="set-remind-interval" aria-label="提醒间隔"></select>
+        <select id="set-remind-times" aria-label="提醒次数"></select>
+      </div>
+    </div>
     <div class="push-title">📮 推送渠道 Key —— 任填一个即可收到推送，多填多推</div>
     <div class="push-grid">
       <div class="field"><label>PushPlus Token</label>
@@ -604,6 +611,14 @@ function fillIntervalOptions(){
   [1, 2, 3, 4, 6, 8, 12, 24].forEach(n => el.add(new Option('每 ' + n + ' 小时', String(n))));
 }
 
+function fillRemindOptions(){
+  const iv = $('#set-remind-interval'), n = $('#set-remind-times');
+  if(iv && !iv.options.length)
+    [5, 10, 15, 30, 60].forEach(m => iv.add(new Option('每 ' + m + ' 分钟', String(m))));
+  if(n && !n.options.length)
+    [0, 1, 2, 3, 5, 8].forEach(c => n.add(new Option(c === 0 ? '不重复提醒' : '重复 ' + c + ' 次', String(c))));
+}
+
 /* 把后端返回的 ISO 时间转成「今天 21:38」这类可读文案 */
 function fmtNextCheck(iso){
   if(!iso) return '';
@@ -638,6 +653,7 @@ async function loadSettings(){
     const s = j.settings, p = s.push;
     fillTimeOptions();
     fillIntervalOptions();
+    fillRemindOptions();
     $('#set-daily').checked = s.enable_daily;
     const t = String(s.checkin_time || '09:00').slice(0, 5).split(':');
     $('#set-time-h').value = t[0] || '09';
@@ -648,6 +664,8 @@ async function loadSettings(){
     $('#set-push-check-bad').checked = s.push_on_check_fail;
     $('#set-relogin').checked = s.auto_relogin;
     $('#set-check-interval').value = String(s.check_interval || 6);
+    $('#set-remind-interval').value = String(s.remind_interval || 5);
+    $('#set-remind-times').value = String(s.remind_times == null ? 3 : s.remind_times);
     $('#push-serverchan').value = p.serverchan || '';
     $('#push-bark').value = p.bark || '';
     $('#push-pushplus').value = p.pushplus || '';
@@ -681,6 +699,8 @@ async function saveSettings(){
       push_on_check_fail: s('set-push-check-bad'),
       auto_relogin: s('set-relogin'),
       check_interval: $('#set-check-interval').value,
+      remind_interval: $('#set-remind-interval').value,
+      remind_times: $('#set-remind-times').value,
       push: {
         serverchan: $('#push-serverchan').value.trim(),
         bark: $('#push-bark').value.trim(),

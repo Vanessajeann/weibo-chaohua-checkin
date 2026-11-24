@@ -15,6 +15,8 @@ DEFAULT_SETTINGS = {
     "checkin_time": "09:00",       # 签到时间 HH:MM
     "auto_relogin": True,          # 登录过期时尝试自动重登 (需要保存密码)
     "check_interval": 6,           # 登录状态例行检测间隔 (小时)
+    "remind_interval": 5,          # 失效重复提醒间隔 (分钟)
+    "remind_times": 3,             # 失效重复提醒次数 (0=只在发现时提醒一次)
     # 推送项目开关 (按事件勾选)
     "push_on_checkin_success": True,   # 签到成功(无失败)推送
     "push_on_checkin_failed": True,    # 签到有失败时推送
@@ -94,6 +96,16 @@ def save_settings(new: dict) -> dict:
         if not v.isdigit() or not 1 <= int(v) <= 24:
             raise ValueError("登录检测间隔应为 1-24 之间的整数小时")
         cur["check_interval"] = int(v)
+    if "remind_interval" in new:
+        v = str(new["remind_interval"]).strip()
+        if not v.isdigit() or not 1 <= int(v) <= 120:
+            raise ValueError("失效提醒间隔应为 1-120 之间的整数分钟")
+        cur["remind_interval"] = int(v)
+    if "remind_times" in new:
+        v = str(new["remind_times"]).strip()
+        if not v.isdigit() or int(v) > 10:
+            raise ValueError("失效提醒次数应为 0-10 之间的整数, 0 表示只在发现时提醒一次")
+        cur["remind_times"] = int(v)
     if "push_hour" in new:
         v = str(new["push_hour"]).strip()
         if v and (not v.isdigit() or not 0 <= int(v) <= 23):

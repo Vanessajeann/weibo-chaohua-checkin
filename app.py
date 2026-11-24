@@ -85,9 +85,9 @@ def _do_checkin(acc: dict, trigger: str) -> dict:
         relog_ok = _try_relogin(acc, name)
         if not relog_ok:
             msg = "登录已过期，请打开签到面板重新扫码登录"
-            _push("微博签到·登录过期", "账号【%s】%s" % (name, msg),
-                  "push_on_check_fail", "检测登录失败")
+            store.update_account(acc["id"], status="expired")  # 供失效重复提醒任务识别
             store.append_log("expired", "账号【%s】登录已过期 (触发: %s)" % (name, trigger))
+            _push_expired("签到时发现 (%s)" % trigger)
             return {"ok": False, "msg": msg, "expired": True}
         client = WeiboClient(store.find_account(acc["id"])["cookies"])
         info = client.login_info()
@@ -199,6 +199,11 @@ def _push(title: str, content: str, switch: str, switch_name: str):
         store.append_log("push", "推送跳过: 未到推送整点 %s 点 | %s" % (h, title))
         return
     results = notifier.push(title, content)
+    _log_push_result(title, results)
+
+
+def _log_push_result(title: str, results):
+    """把一次推送的各渠道结果记入运行日志 (推送记录)。"""
     if not results:
         store.append_log("push", "推送失败: 未配置任何推送 Key | %s" % title)
         return
@@ -207,6 +212,81 @@ def _push(title: str, content: str, switch: str, switch_name: str):
         r = " ".join(str(r).split())
         parts.append("%s=%s" % (name, "成功" if r == "ok" else "失败 " + r[:60]))
     store.append_log("push", "%s | %s" % (title, "; ".join(parts)))
+
+
+def _remind_cfg() -> tuple:
+    """失效提醒配置: (间隔分钟, 重复次数), 取自设置, 非法值回退默认 (5 分钟, 3 次)。"""
+    s = store.get_settings()
+    try:
+        interval = int(s.get("remind_interval") or 5)
+    except (TypeError, ValueError):
+        interval = 5
+    try:
+        times = int(s.get("remind_times") if s.get("remind_times") is not None else 3)
+    except (TypeError, ValueError):
+        times = 3
+    return max(1, min(120, interval)), max(0, min(10, times))
+
+
+def _push_expired(trigger: str, log_skip: bool = True, accounts=None):
+    """失效警示推送: 列出已失效账号, 警示样式。
+
+    - 各检测入口 (签到/检测签到/检测登录/例行检测) 发现失效时立即推一次;
+      之后由 expired_reminder 定时任务按设置的间隔重复推送, 最多推设置的
+      次数 (remind_times, 0=不重复), 账号重新登录后提前停止并清零计数。
+    - 失效属于紧急告警, 不受「推送整点」限制; 但尊重「检测登录失败」开关。
+    - log_skip: 开关关闭时是否记日志。检测入口记一次便于排查;
+      提醒任务传 False 静默跳过, 避免每轮刷一条日志。
+    - accounts: 只提醒指定账号 (提醒任务传待提醒列表); 缺省取全部失效账号。
+    """
+    expired = [a for a in (accounts if accounts is not None
+                           else store.get_accounts())
+               if a.get("status") == "expired"]
+    if not expired:
+        return
+    if not store.get_settings().get("push_on_check_fail", True):
+        if log_skip:
+            store.append_log("push", "推送跳过: 「检测登录失败」开关未开启 | 账号失效提醒")
+        return
+    title = ("⚠️ 微博签到账号登录失效" if len(expired) == 1
+             else "⚠️ 微博签到: %d 个账号登录失效" % len(expired))
+    rows = []
+    for i, a in enumerate(expired):
+        name = (a.get("nickname") or a.get("remark")
+                or ("微博用户" + (a.get("uid") or a["id"])))
+        last = _fmt_ts(a.get("last_alive")) if a.get("last_alive") else "未知"
+        rows.append("%s %s (最后在线 %s)"
+                    % ("└" if i == len(expired) - 1 else "├", name, last))
+    _interval, times = _remind_cfg()
+    if times > 0:
+        tail = ("🔁 每 %d 分钟提醒一次, 最多 %d 次; 重登后立即停止"
+                % (_interval, times))
+    else:
+        tail = "🔁 已设置为不重复提醒, 请尽快处理"
+    content = (
+        "🚨 登录失效, 自动签到已停止!\n\n"
+        "失效账号:\n" + "\n".join(rows) + "\n\n"
+        "👉 请打开面板重新扫码登录\n" + tail
+    )
+    _log_push_result(title, notifier.push(title, content))
+
+
+def expired_reminder():
+    """失效重复提醒任务: 按设置的间隔执行, 每次失效最多重复提醒设置的次数。"""
+    _, times = _remind_cfg()
+    accs = store.get_accounts()
+    # 已恢复登录的账号清零提醒计数 (下轮失效从头计)
+    for a in accs:
+        if a.get("status") != "expired" and a.get("expired_pushes"):
+            store.update_account(a["id"], expired_pushes=0)
+    due = [a for a in accs if a.get("status") == "expired"
+           and int(a.get("expired_pushes") or 0) < times]
+    if not due:
+        return
+    _push_expired("失效重复提醒", log_skip=False, accounts=due)
+    for a in due:
+        store.update_account(a["id"],
+                             expired_pushes=int(a.get("expired_pushes") or 0) + 1)
 
 
 def run_checkin_all(trigger: str = "定时"):
@@ -267,18 +347,19 @@ def expiry_monitor():
         if acc.get("status") != "expired":  # 状态变化时记一条日志 (推送由检测汇总统一发)
             store.append_log("expired", "账号【%s】登录已过期 (例行检测)" % name)
         lines.append("%s: 已过期, 请重新扫码登录" % name)
-    # 检测结果汇总推送: 全部正常走「检测登录成功」开关, 有异常走「检测登录失败」开关
+    # 检测结果推送: 全部正常 -> 常规汇总 (走「检测登录成功」开关);
+    # 有失效 -> 警示推送 (走「检测登录失败」开关, 内容列出失效账号)
     if accounts:
         all_ok = ok_count == len(accounts)
-        title = ("微博登录检测: 全部正常" if all_ok
-                 else "微博登录检测: %d/%d 正常" % (ok_count, len(accounts)))
-        content = ("检测结果: 共 %d 个账号\n" % len(accounts)
-                   + "\n".join(("└ " if i == len(lines) - 1 else "├ ") + l
-                                for i, l in enumerate(lines))
-                   + "\n\n下次检测: " + _fmt_next_check())
-        _push(title, content,
-              "push_on_check_ok" if all_ok else "push_on_check_fail",
-              "检测登录成功" if all_ok else "检测登录失败")
+        if all_ok:
+            title = "微博登录检测: 全部正常"
+            content = ("检测结果: 共 %d 个账号\n" % len(accounts)
+                       + "\n".join(("└ " if i == len(lines) - 1 else "├ ") + l
+                                    for i, l in enumerate(lines))
+                       + "\n\n下次检测: " + _fmt_next_check())
+            _push(title, content, "push_on_check_ok", "检测登录成功")
+        else:
+            _push_expired("例行登录检测")
 
 
 def _daily_job():
@@ -356,6 +437,11 @@ def schedule_all():
     scheduler.add_job(expiry_monitor, "interval", hours=interval,
                       id="expiry_monitor", replace_existing=True,
                       next_run_time=next_rt)
+    # 失效账号重复提醒: 间隔与次数均可在设置里调整,
+    # 账号重新登录 (status 恢复 ok) 后提前停止
+    rmin, _ = _remind_cfg()
+    scheduler.add_job(expired_reminder, "interval", minutes=rmin,
+                      id="expired_reminder", replace_existing=True)
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +553,7 @@ def api_detect(acc_id: str):
         info = client.login_info()
         if not info["login"]:
             store.update_account(acc_id, status="expired", last_alive=time.time())
+            _push_expired("手动「检测签到」")
             return {"ok": False, "msg": "登录已过期，请重新扫码登录", "expired": True}
         d = client.detect()
         store.update_account(acc_id, status="ok", last_alive=time.time())
@@ -495,6 +582,7 @@ def api_check_login(acc_id: str):
                 store.update_account(acc_id, nickname=nick)
         return {"ok": True, "login": True}
     store.update_account(acc_id, status="expired")
+    _push_expired("手动「检测登录」")
     return {"ok": True, "login": False}
 
 
