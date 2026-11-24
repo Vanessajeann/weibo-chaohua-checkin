@@ -1,5 +1,7 @@
 # weibo-chaohua-checkin
 
+安卓用户可在手机上安装 LSPosed 测试版，打开微博时为已关注的超话签到。[安装、使用与构建说明](android-module/README.md)
+
 微博超话自动签到 —— 本地 / Docker 自托管版，带 Web 管理界面、扫码登录与多渠道推送通知。
 
 在自己服务器 / NAS 上用 Docker 一键部署，网页里扫码添加账号即可长期自动签到，签到结果和登录过期实时推送到手机。

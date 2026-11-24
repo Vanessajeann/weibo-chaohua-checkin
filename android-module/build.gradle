@@ -1,0 +1,24 @@
+plugins {
+    id 'com.android.application' version '9.0.1'
+}
+android {
+    namespace 'io.github.chaohua.checkin'
+    compileSdk 36
+    buildToolsVersion '36.1.0'
+    defaultConfig {
+        applicationId 'io.github.chaohua.checkin'
+        minSdk 27
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+dependencies {
+    compileOnly 'de.robv.android.xposed:api:82'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}

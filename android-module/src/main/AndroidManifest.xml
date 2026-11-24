@@ -1,0 +1,24 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <queries><package android:name="com.sina.weibo"/></queries>
+    <application android:label="超话签到" android:allowBackup="false"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
+        <meta-data android:name="xposedmodule" android:value="true"/>
+        <meta-data android:name="xposedminversion" android:value="82"/>
+        <meta-data android:name="xposeddescription" android:value="打开微博时，使用模块内登录的账号签到已关注的超话"/>
+        <meta-data android:name="xposedscope" android:resource="@array/xposed_scope"/>
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <activity android:name=".LoginActivity" android:exported="false"/>
+        <receiver android:name=".OpenReceiver" android:exported="true">
+            <intent-filter><action android:name="io.github.chaohua.checkin.OPEN"/></intent-filter>
+        </receiver>
+        <service android:name=".CheckinJob" android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="true"/>
+    </application>
+</manifest>
